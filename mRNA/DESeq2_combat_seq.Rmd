@@ -1,0 +1,79 @@
+---
+title: "DESeq2 + combat seq"
+author: "Benji Lamp"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(DESeq2)
+library(sva)
+library(tidyr)
+library(here)
+```
+
+```{r}
+input <- "mRNA_filtered_rawcounts.RData"
+load(here("processed_data", input))
+```
+
+
+# Normalization
+
+## ComBatSeq
+
+Strandedness as a batch effect was seen to have distorted our data when using principal component analysis as a diagnostic tool. In order to correct the batch effect, the ComBat_seq function from the sva package was used. This function adjusts for batch effects using the batch variable from our metadata and considers the experimental design (like time course variables) to prevent overfitting.
+
+```{r}
+count_matrix <- as.matrix(df)
+
+cdf <- ComBat_seq(count_matrix,
+                  batch = samples$batch,
+                  group = samples$condition)
+```
+
+## DESeq2
+
+
+A standard DESeq function was applied using the counts corrected by ComBat_seq and the experimental design from the 'samples' metadata frame.
+
+```{r, message=FALSE, warning=FALSE}
+dds <- DESeqDataSetFromMatrix(
+  countData = cdf,
+  colData = samples,
+  design = ~ condition
+)
+
+dds <- DESeq(dds)
+res <- results(dds)
+```
+
+## Uncorrected 
+
+```{r, message=FALSE, warning=FALSE}
+dds_uncorected <- DESeqDataSetFromMatrix(
+  countData = count_matrix,
+  colData = samples,
+  design = ~ condition
+)
+
+dds_uncorected <- DESeq(dds_uncorected)
+
+res_uncorected <- results(dds_uncorected)
+```
+
+
+
+```{r}
+x <- ls()
+x <- x[!x %in% c("res_uncorected", "dds_uncorected", "dds", "res")]
+rm(list = x)
+rm(x)
+
+save.image(here("processed_data", "mRNA_deseq_results.RData"))
+```

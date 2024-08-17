@@ -1,0 +1,104 @@
+---
+title: "Read in Raw mRNA Counts, and Filter"
+author: "Benji Lamp"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    file: "knited_htmls/read_and_filter_raw_counts.html"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Libraries #####################################################################
+library(dplyr)
+library(readxl)
+library(tidyr)
+library(here)
+```
+
+
+```{r}
+# Raw Count Data From Galaxy #####################################################
+file_path <- 'https://raw.githubusercontent.com/blamp23/transcriptional_dynamics_of_bov_mam/main/mRNA/raw_data/mRNA_raw_counts.tabular'
+
+df <- read.delim(file_path, header = TRUE, row.names = 1)
+df <- df[-1]
+
+
+samples <- data.frame(
+  row.names = c("v_468", "v_502", "v_504", "v_507", "v_509", "v_598", "v_610", 
+                "mp_468", "mp_502", "mp_504", "mp_507", "mp_509", "mp_598", "mp_610",
+                "lp_468", "lp_502", "lp_504", "lp_509", "lp_507", "lp_598", "lp_610",
+                "el_468", "el_502", "el_504", "el_507", "el_509", "el_598", "el_610",
+                "l_468", "l_502", "l_504", "l_507", "l_509", "l_598", "l_610"),
+  condition = c(rep("v", 7), rep("mp", 7), rep("lp", 7), rep("el", 7), rep("l", 7)),
+  animal = c(468, 502, 504, 507, 509, 598, 610,
+             468, 502, 504, 507, 509, 598, 610,
+             468, 502, 504, 509, 507, 598, 610,
+             468, 502, 504, 507, 509, 598, 610,
+             468, 502, 504, 507, 509, 598, 610),
+  batch = c(1, 1, 1, 1, 1, 1, 1, 
+            0, 1, 0, 1, 0, 0, 0,
+            0, 1, 0, 0, 1, 0, 0,
+            0, 1, 0, 1, 0, 0, 0, 
+            1, 1, 1, 1, 1, 1, 1 )
+)
+
+new_colnames <- c(row.names(samples))
+colnames(df) <- new_colnames
+
+colnames(df)[28] <- "lp_610"  # lp_610 and el_610 are swapped samples
+colnames(df)[21] <- "el_610"
+
+el_610 <- which(names(df) == "el_610")
+lp_610 <- which(names(df) == "lp_610")
+
+# Create a new vector of column names with the positions of these two columns swapped
+new_order <- names(df)
+new_order[c(el_610, lp_610)] <- new_order[c(lp_610, el_610)]
+
+# Reorder the columns in the DataFrame
+df <- df[, new_order]
+
+samples <- samples[colnames(df), ]
+```
+
+
+```{r}
+# Filter Method A ##############################################################
+# originaly 27607 genes
+# filtered to 17344 genes
+# Step 1: Splitting Data by Condition
+conditions <- unique(samples$condition)
+split_data <- lapply(conditions, function(cond) {
+  df[, samples$condition == cond]
+})
+
+# Step 2: Define Filtering Function
+count_high_expressions <- function(data) {
+  apply(data, 1, function(gene) {
+    sum(gene >= 3) >= 4  # Returns TRUE if at least 4 out of 7 samples have counts ≥ 3
+  })
+}
+high_exp_counts <- lapply(split_data, count_high_expressions)
+
+# Step 3: Aggregate Results for inclusion
+gene_inclusion_filter <- rowSums(do.call(cbind, high_exp_counts)) >= 1 # If 1/5 timepoints meet crit, gene is included
+
+# Step 4: Filter Genes
+df <- df[gene_inclusion_filter, ]
+```
+
+```{r}
+x <- ls()
+x <- x[!x %in% c("df", "samples")]
+rm(list = x)
+rm(x)
+
+save.image(here('/processed'))
+```
+
+

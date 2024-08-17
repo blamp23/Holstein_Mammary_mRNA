@@ -4,7 +4,6 @@ author: "Benji Lamp"
 date: "`r Sys.Date()`"
 output:
   html_document:
-    file: "knited_htmls/read_and_filter_raw_counts.html"
 ---
 
 ```{r setup, include=FALSE}
@@ -17,7 +16,6 @@ library(dplyr)
 library(readxl)
 library(tidyr)
 library(here)
-
 ```
 
 
@@ -99,7 +97,7 @@ x <- x[!x %in% c("df", "samples")]
 rm(list = x)
 rm(x)
 
-save.image(here('/processed'))
+save.image(here("processed_data", "mRNA_filtered_rawcounts.RData"))
 ```
 
 

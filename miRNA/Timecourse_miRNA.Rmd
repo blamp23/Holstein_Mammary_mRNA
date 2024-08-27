@@ -13,7 +13,18 @@ knitr::opts_chunk$set(echo = TRUE)
 # Libraries ##########################################################################
 library(DESeq2)
 library(dplyr)
+library(here)
+library(openxlsx)
+```
 
+```{r}
+input <- "miRNA_deseq_results.RData"
+load(here("miRNA/processed_data", input))
+```
+
+
+
+```{r}
 # Normalized Count table and dds object from DESeq are needed to run code
 col_names <- c(rep("V", 11),
                rep("MP", 8),
@@ -169,7 +180,7 @@ for (name in names(motif_index)) {
 }
 
 # Define the file path and name of your Excel file
-file_path <- "C:/Users/12142/Downloads/miRNA_motif_index.xlsx"
+file_path <- here("miRNA/processed_data", "miRNA_motif_index.xlsx")
 
 # Save the workbook
 saveWorkbook(wb, file_path, overwrite = TRUE)

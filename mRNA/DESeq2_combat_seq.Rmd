@@ -19,7 +19,7 @@ library(here)
 
 ```{r}
 input <- "mRNA_filtered_rawcounts.RData"
-load(here("processed_data", input))
+load(here("mRNA/processed_data", input))
 ```
 
 
@@ -75,5 +75,5 @@ x <- x[!x %in% c("res_uncorected", "dds_uncorected", "dds", "res")]
 rm(list = x)
 rm(x)
 
-save.image(here("processed_data", "mRNA_deseq_results.RData"))
+save.image(here("mRNA/processed_data", "mRNA_deseq_results.RData"))
 ```

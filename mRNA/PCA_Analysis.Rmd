@@ -18,7 +18,7 @@ library(dplyr)
 library(plotly)
 
 input <- "mRNA_deseq_results.RData"
-load(here("processed_data", input))
+load(here("mRNA/processed_data", input))
 ```
 
 ### PCA {.tabset}

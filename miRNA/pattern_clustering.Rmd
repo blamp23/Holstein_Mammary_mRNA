@@ -59,6 +59,7 @@ print(metadata)
 normalized_counts_df <- as.data.frame(normalized_counts)
 normalized_counts_df$gene <- rownames(normalized_counts_df)
 
+View(res)
 res <- results(dds)
 res_df <- as.data.frame(res)
 res_df$gene <- rownames(res_df)

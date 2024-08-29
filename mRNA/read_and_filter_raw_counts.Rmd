@@ -26,14 +26,14 @@ file_path <- 'https://raw.githubusercontent.com/blamp23/transcriptional_dynamics
 df <- read.delim(file_path, header = TRUE, row.names = 1)
 df <- df[-1]
 
-
+# Modify samples data frame with capitalized time points and spaces
 samples <- data.frame(
-  row.names = c("v_468", "v_502", "v_504", "v_507", "v_509", "v_598", "v_610", 
-                "mp_468", "mp_502", "mp_504", "mp_507", "mp_509", "mp_598", "mp_610",
-                "lp_468", "lp_502", "lp_504", "lp_509", "lp_507", "lp_598", "lp_610",
-                "el_468", "el_502", "el_504", "el_507", "el_509", "el_598", "el_610",
-                "l_468", "l_502", "l_504", "l_507", "l_509", "l_598", "l_610"),
-  condition = c(rep("v", 7), rep("mp", 7), rep("lp", 7), rep("el", 7), rep("l", 7)),
+  row.names = c("V 468", "V 502", "V 504", "V 507", "V 509", "V 598", "V 610", 
+                "MP 468", "MP 502", "MP 504", "MP 507", "MP 509", "MP 598", "MP 610",
+                "LP 468", "LP 502", "LP 504", "LP 509", "LP 507", "LP 598", "LP 610",
+                "EL 468", "EL 502", "EL 504", "EL 507", "EL 509", "EL 598", "EL 610",
+                "PL 468", "PL 502", "PL 504", "PL 507", "PL 509", "PL 598", "PL 610"),
+  condition = c(rep("V", 7), rep("MP", 7), rep("LP", 7), rep("EL", 7), rep("PL", 7)),
   animal = c(468, 502, 504, 507, 509, 598, 610,
              468, 502, 504, 507, 509, 598, 610,
              468, 502, 504, 509, 507, 598, 610,
@@ -46,14 +46,16 @@ samples <- data.frame(
             1, 1, 1, 1, 1, 1, 1 )
 )
 
+# Update the column names with capitalized time points and spaces
 new_colnames <- c(row.names(samples))
 colnames(df) <- new_colnames
 
-colnames(df)[28] <- "lp_610"  # lp_610 and el_610 are swapped samples
-colnames(df)[21] <- "el_610"
+# Correct swapped samples
+colnames(df)[28] <- "LP 610"  # LP 610 and EL 610 are swapped samples
+colnames(df)[21] <- "EL 610"
 
-el_610 <- which(names(df) == "el_610")
-lp_610 <- which(names(df) == "lp_610")
+el_610 <- which(names(df) == "EL 610")
+lp_610 <- which(names(df) == "LP 610")
 
 # Create a new vector of column names with the positions of these two columns swapped
 new_order <- names(df)
@@ -62,7 +64,9 @@ new_order[c(el_610, lp_610)] <- new_order[c(lp_610, el_610)]
 # Reorder the columns in the DataFrame
 df <- df[, new_order]
 
+# Ensure the samples data frame matches the reordered columns
 samples <- samples[colnames(df), ]
+
 ```
 
 
@@ -97,7 +101,7 @@ x <- x[!x %in% c("df", "samples")]
 rm(list = x)
 rm(x)
 
-save.image(here("processed_data", "mRNA_filtered_rawcounts.RData"))
+save.image(here("mRNA/processed_data", "mRNA_filtered_rawcounts.RData"))
 ```
 
 

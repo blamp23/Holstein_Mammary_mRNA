@@ -11,7 +11,7 @@
 
 <meta name="author" content="Benji Lamp" />
 
-<meta name="date" content="2024-08-17" />
+<meta name="date" content="2024-08-28" />
 
 <title>DESeq2 + combat seq</title>
 
@@ -352,7 +352,7 @@ display: none;
 
 <h1 class="title toc-ignore">DESeq2 + combat seq</h1>
 <h4 class="author">Benji Lamp</h4>
-<h4 class="date">2024-08-17</h4>
+<h4 class="date">2024-08-28</h4>
 
 </div>
 
@@ -362,7 +362,7 @@ library(sva)
 library(tidyr)
 library(here)</code></pre>
 <pre class="r"><code>input &lt;- &quot;mRNA_filtered_rawcounts.RData&quot;
-load(here(&quot;processed_data&quot;, input))</code></pre>
+load(here(&quot;mRNA/processed_data&quot;, input))</code></pre>
 <div id="normalization" class="section level1">
 <h1>Normalization</h1>
 <div id="combatseq" class="section level2">
@@ -416,7 +416,7 @@ x &lt;- x[!x %in% c(&quot;res_uncorected&quot;, &quot;dds_uncorected&quot;, &quo
 rm(list = x)
 rm(x)
 
-save.image(here(&quot;processed_data&quot;, &quot;mRNA_deseq_results.RData&quot;))</code></pre>
+save.image(here(&quot;mRNA/processed_data&quot;, &quot;mRNA_deseq_results.RData&quot;))</code></pre>
 </div>
 </div>
 

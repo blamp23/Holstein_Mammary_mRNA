@@ -1,0 +1,93 @@
+---
+title: "mrna degpatterns"
+author: "Benji Lamp"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=F}
+library(DESeq2)
+library(here)
+library(DEGreport)
+```
+
+# Intro
+Using deg patterns to cluster mirna based on zscore based off of a timecourse.
+\ Use normalized counts from deseq
+
+```{r}
+input <- "mRNA_deseq_results.RData"
+load(here("mRNA/processed_data", input))
+```
+
+# DEGpatterns
+## Metadata
+
+```{r}
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Assuming colnames(normalized_counts) gives the column names as shown
+col_names <- colnames(normalized_counts)
+
+split_names <- strsplit(col_names, " ")
+
+# Extract time points and cow IDs
+time_points <- sapply(split_names, `[`, 1)
+cow_ids <- sapply(split_names, `[`, 2)
+
+# Create the metadata data frame
+metadata <- data.frame(
+  SampleID = col_names,
+  Time = factor(time_points, levels = c("V", "MP", "LP", "EL", "PL")),
+  CowID = cow_ids
+)
+
+# Set row names to match SampleID (optional)
+rownames(metadata) <- metadata$SampleID
+
+# View the metadata
+print(metadata)
+
+```
+
+
+
+```{r}
+normalized_counts_df <- as.data.frame(normalized_counts)
+normalized_counts_df$gene <- rownames(normalized_counts_df)
+
+res <- results(dds)
+res_df <- as.data.frame(res)
+res_df$gene <- rownames(res_df)
+
+
+merged_df <- merge(normalized_counts_df, res_df, by = "gene")
+
+# Filter significant genes (you might adjust the threshold)
+significant_genes <- merged_df[merged_df$padj < 0.05, ]
+
+# Extract only the normalized counts for significant genes
+significant_counts <- significant_genes[, colnames(normalized_counts)]
+
+
+# Run degPatterns with a minimum cluster size of 15 genes
+mrna_deg_patterns <- degPatterns(significant_counts, metadata = metadata, time = "Time", minc = 15)
+```
+
+
+
+```{r}
+x <- ls()
+x <- x[!x %in% c("mrna_deg_patterns")]
+rm(list = x)
+rm(x)
+
+save.image(here("mRNA/processed_data", "mrna_deg_patterns.RData"))
+```
+
+
+

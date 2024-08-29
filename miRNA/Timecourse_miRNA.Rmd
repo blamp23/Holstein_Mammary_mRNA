@@ -96,9 +96,10 @@ for (i in seq_along(contrasts)) {
   # Store results in a list
   contrast_results[[paste(contrast[3], "to", contrast[2])]] <- res
 }
+```
 
 
-
+```{r}
 # Generation of expression motif ###############################################
 
 # Initialize a dataframe with gene names
@@ -147,7 +148,10 @@ for(model in unique(vector)) {
 }
 summary(motif_index)
 mi_miRNA <- motif_index
+```
 
+
+```{r}
 # Search commands ##############################################################
 summary(motif_index)
 contrast_results$`LP to EL`[rownames(contrast_results$`LP to EL`) == "bta.miR.2285d", ]
@@ -166,6 +170,10 @@ model_vector_df <- data.frame(gene = combined_results$gene, modelVector = combin
 normalized_counts_df1 <- merge(normalized_counts_df, model_vector_df, by = "gene", all.x = TRUE)
 
 # Now normalized_counts_df should have the modelVector column added
+```
+
+
+```{r}
 ############################
 # Create a new workbook
 wb <- createWorkbook()

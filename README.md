@@ -70,7 +70,7 @@ We profiled transcriptomic changes across five timepoints (Virgin [V], Mid-Pregn
 ## 📤 GEO Submission
 
 Raw FASTQ and processed count matrices are available at:
-**GEO Accession**: `GSE123456` *(placeholder)*
+**GEO Accession**: `GSE299330`
 
 ---
 

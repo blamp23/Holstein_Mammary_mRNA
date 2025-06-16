@@ -2,11 +2,11 @@
 
 This repository contains the complete bioinformatic pipeline for analyzing transcriptional dynamics in the bovine mammary gland using mRNA sequencing data collected across five lactation stages.
 
-## 📁 Project Overview
+## Project Overview
 
 We profiled transcriptomic changes across five timepoints (Virgin [V], Mid-Pregnancy [MP], Late Pregnancy [LP], Early Lactation [EL], and Peak Lactation [PL]) in Holstein mammary epithelial tissue using a combination of raw FASTQ processing, normalization, and expression motif clustering.
 
-## 📌 Sample Details
+## Sample Details
 
 | Source          | Type         | Platform             | Timepoints Covered   |
 |-----------------|--------------|----------------------|----------------------|

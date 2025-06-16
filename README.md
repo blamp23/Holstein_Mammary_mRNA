@@ -84,4 +84,6 @@ Raw FASTQ and processed count matrices are available at:
 ## 💬 Contact
 
 For questions:
-**Benji Lamp** — `blamp25@tamu.edu`
+
+- **Benji Lamp** — `blamp25@tamu.edu`
+- **Monique Rijnkels** - `mrijnkels@cvm.tamu.edu`

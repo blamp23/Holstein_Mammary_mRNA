@@ -36,6 +36,7 @@ We profiled transcriptomic changes across five timepoints (Virgin [V], Mid-Pregn
 
 **Batch Correction**
 - Tool: `SVA`
+- Function: `ComBatSeq()`
 - Adjusted for library prep and strandedness using surrogate variables
 
 **Normalization**

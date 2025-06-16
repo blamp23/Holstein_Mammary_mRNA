@@ -1,0 +1,198 @@
+---
+title: "Untitled"
+author: "Benji Lamp"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=F}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(DESeq2)
+library(dplyr)
+library(tidyr)
+library(kableExtra)
+library(here)
+library(AnnotationDbi)
+library(org.Bt.eg.db)
+```
+
+
+
+```{r}
+input <- "mRNA_deseq_results.RData"
+load(here("mRNA/processed_data", input))
+```
+
+
+# Timecourse Analysis
+
+```{r, echo=FALSE, message=FALSE}
+dds <- estimateSizeFactors(dds)
+normalized_counts_df <- as.data.frame(counts(dds, normalized=TRUE))
+col_names <- rep(c("V", "MP", "LP", "EL", "PL"), each = 7)
+names(normalized_counts_df) <- col_names
+
+# Prepare an empty data frame for storing averages, with correct dimensions and column names
+averages_df <- data.frame(matrix(ncol = length(unique(col_names)), nrow = nrow(normalized_counts_df)))
+names(averages_df) <- unique(col_names)
+rownames(averages_df) <- rownames(normalized_counts_df)
+
+# Loop through each time-point to calculate and store row means
+for (timepoint in unique(col_names)) {
+  # Identify columns belonging to the current time-point
+  cols <- which(col_names == timepoint)
+  # Calculate and store
+  averages_df[[timepoint]] <- rowMeans(normalized_counts_df[, cols], na.rm = TRUE)
+}
+```
+
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Define contrasts
+contrast_definitions <- list(
+  "Virgin to Mid-Pregnant" = c("condition", "MP", "V"),
+  "Mid-Pregnant to Late-Pregnant" = c("condition", "LP", "MP"),
+  "Late-Pregnant to Early Lactation" = c("condition", "EL", "LP"),
+  "Early to Peak Lactation" = c("condition", "PL", "EL")
+)
+
+volcano_df <- data.frame()
+
+# Collect DE results
+for (label in names(contrast_definitions)) {
+  contrast <- contrast_definitions[[label]]
+  res <- results(dds, contrast = contrast)
+  df <- as.data.frame(res)
+  df$Ensembl_ID <- rownames(df)
+  df$Comparison <- label
+
+  df$gene_symbol <- mapIds(org.Bt.eg.db,
+                           keys = df$Ensembl_ID,
+                           column = "SYMBOL",
+                           keytype = "ENSEMBL",
+                           multiVals = "first")
+
+  df$Significance <- "Not Sig"
+  df$Significance[df$padj < 0.05 & df$log2FoldChange > 1] <- "Up"
+  df$Significance[df$padj < 0.05 & df$log2FoldChange < -1] <- "Down"
+
+  df$log10padj <- -log10(df$padj)
+  df$log10padj[is.infinite(df$log10padj)] <- NA
+
+  # Clip extreme values for better display
+  df$log2FoldChange_clipped <- pmin(pmax(df$log2FoldChange, -20), 20)
+
+  volcano_df <- bind_rows(volcano_df, df)
+}
+
+# Fix facet order
+volcano_df$Comparison <- factor(volcano_df$Comparison,
+                                 levels = c(
+                                   "Virgin to Mid-Pregnant",
+                                   "Mid-Pregnant to Late-Pregnant",
+                                   "Late-Pregnant to Early Lactation",
+                                   "Early to Peak Lactation"
+                                 ))
+```
+
+
+```{r}
+# Plot
+p1 <- ggplot(volcano_df, aes(x = log2FoldChange_clipped, y = log10padj)) +
+  geom_point(aes(color = Significance), alpha = 0.6, size = 1) +
+  scale_color_manual(values = c("Up" = "firebrick", "Down" = "steelblue", "Not Sig" = "gray70")) +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "black") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +
+  facet_wrap(~Comparison, nrow = 2, ncol = 2) +
+  labs(x = "Log2 Fold Change (clipped at ±20)",
+       y = "-log10 Adjusted p-value",
+       color = "Direction") +
+  theme_minimal() +
+  theme(strip.text = element_text(size = 12, face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "bottom")
+
+```
+
+
+```{r}
+p_main <- ggplot(volcano_df, aes(x = log2FoldChange, y = log10padj)) +
+  geom_point(aes(color = Significance), alpha = 0.6, size = 1) +   # ✅ ADD THIS
+  scale_color_manual(values = c("Up" = "firebrick", "Down" = "steelblue", "Not Sig" = "gray70")) +
+  geom_vline(xintercept = c(-1, 1), linetype = "dashed", color = "black") +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +
+  coord_cartesian(xlim = c(-20, 20)) +
+  facet_grid(rows = vars(Comparison)) +
+  labs(title = "Main Volcano Plot", x = "Log2 Fold Change", y = "-log10 Adjusted p-value") +
+  theme_minimal()
+
+p_outliers <- ggplot(subset(volcano_df, log2FoldChange < -30), aes(x = log2FoldChange, y = log10padj)) +
+  geom_point(aes(color = Significance), size = 1, alpha = 0.7) +
+  scale_color_manual(values = c("Down" = "steelblue")) +
+  coord_cartesian(xlim = c(-60, -30)) +
+  facet_grid(rows = vars(Comparison)) +
+  labs(title = "Extreme Downregulated Outliers", x = "Log2 Fold Change", y = "-log10 Adjusted p-value") +
+  theme_minimal()
+
+# Combine the two
+library(patchwork)
+p2 <- p_main + p_outliers + plot_layout(ncol = 2, widths = c(3, 1))
+
+```
+
+```{r}
+library(EnhancedVolcano)
+
+# Create EnhancedVolcano plots for each comparison
+volcano_list <- list()
+
+for (label in levels(volcano_df$Comparison)) {
+  df_sub <- subset(volcano_df, Comparison == label)
+
+  volcano_list[[label]] <- EnhancedVolcano(
+    df_sub,
+    lab = df_sub$gene_symbol,
+    x = 'log2FoldChange',
+    y = 'padj',
+    title = label,
+    subtitle = NULL,
+    caption = NULL,
+    pCutoff = 0.05,
+    FCcutoff = 1,
+    pointSize = 2,
+    labSize = 3.5,
+    col = c("gray70", "steelblue", "firebrick", "purple"),
+    legendLabels = c('NS', 'Log2FC', 'p-adj', 'p-adj & Log2FC'),
+    legendPosition = 'bottom',
+    drawConnectors = TRUE,
+    widthConnectors = 0.3
+  )
+}
+
+# Display plots
+volcano_list[["Virgin to Mid-Pregnant"]]
+
+```
+
+
+```{r}
+pdf('/Users/lamp_b/Downloads/all_volcano_plots.pdf', width = 12, height = 8)
+
+# Print ggplot2-based plots
+print(p1)
+print(p2)
+
+# Print all EnhancedVolcano plots
+for (label in names(volcano_list)) {
+  print(volcano_list[[label]])
+}
+
+# Close PDF device
+dev.off()
+```
+
+

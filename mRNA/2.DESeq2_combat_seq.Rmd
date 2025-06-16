@@ -1,0 +1,328 @@
+---
+title: "DESeq2 + combat seq"
+author: "Benji Lamp"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(DESeq2)
+library(sva)
+library(tidyr)
+library(here)
+```
+
+```{r}
+input <- "mRNA_filtered_rawcounts.RData"
+load(here("mRNA/processed_data", input))
+```
+
+
+# Normalization
+
+## ComBatSeq
+
+Strandedness as a batch effect was seen to have distorted our data when using principal component analysis as a diagnostic tool. In order to correct the batch effect, the ComBat_seq function from the sva package was used. This function adjusts for batch effects using the batch variable from our metadata and considers the experimental design (like time course variables) to prevent overfitting.
+
+```{r}
+count_matrix <- as.matrix(df)
+
+cdf <- ComBat_seq(count_matrix,
+                  batch = samples$batch,
+                  group = samples$condition)
+```
+
+
+## DESeq2
+
+
+A standard DESeq function was applied using the counts corrected by ComBat_seq and the experimental design from the 'samples' metadata frame.
+
+```{r, message=FALSE, warning=FALSE}
+dds <- DESeqDataSetFromMatrix(
+  countData = cdf,
+  colData = samples,
+  design = ~ condition
+)
+
+dds <- DESeq(dds)
+res <- results(dds)
+```
+
+
+```{r}
+# Perform variance stabilizing transformation (VST)
+vsd <- varianceStabilizingTransformation(dds, blind=FALSE)
+
+# Extract PCA data
+pcaData <- plotPCA(vsd, intgroup = "condition", returnData=TRUE)
+
+# Add sample labels to the PCA data (optional, for reference)
+pcaData$label <- rownames(pcaData)  # Use rownames as the labels
+
+# Define your colors
+myColors <- c(
+  "V" = "#F8766D",
+  "MP" = "#00BA38",
+  "LP" = "#619CFF",
+  "EL" = "#F564E3", 
+  "PL" = "#FFC000" 
+)
+
+
+library(ggrepel)
+
+# Reorder factor levels for 'condition' to ensure correct order in the legend
+pcaData$condition <- factor(pcaData$condition, levels = c("V", "MP", "LP", "EL", "PL"))
+
+
+library(ggrepel)
+
+# Reorder factor levels for 'condition' to ensure correct order in the legend
+pcaData$condition <- factor(pcaData$condition, levels = c("V", "MP", "LP", "EL", "PL"))
+
+
+pca_plot <- ggplot(pcaData, aes(x = PC1, y = PC2, color = condition)) +
+  geom_point(size=5) +  # Points
+  stat_ellipse(aes(group = condition), linetype = "dashed", size=1.2) +  # Add trend ellipses
+  geom_text_repel(aes(label = label), 
+                  size = 4, 
+                  max.overlaps = 5,  # Set this to limit the number of overlapping labels displayed
+                  box.padding = 0.35, 
+                  point.padding = 0.3, 
+                  segment.color = 'grey50') +  # Repel labels to prevent overlap
+  scale_color_manual(values = myColors) +
+  theme_minimal() +
+  labs(title = "miRNA Normalized PCA",
+       x = paste0("PC1: ", round(attr(pcaData, "percentVar")[1] * 100, 1), "% variance"),
+       y = paste0("PC2: ", round(attr(pcaData, "percentVar")[2] * 100, 1), "% variance"),
+       color = "Condition") +  # Add a legend title for the conditions
+  theme(legend.position = "right",  # Place legend on the right
+        plot.title = element_text(size = 18, face = "bold"),  # Increase title size
+        axis.title = element_text(size = 16),  # Increase axis title size
+        axis.text = element_text(size = 14))  # Increase axis label size
+pca_plot
+ggsave(filename = "mirpca_plot_3x12.png", plot = pca_plot, width = 12, height = 5)
+```
+
+```{r}
+# Load necessary libraries
+library(DESeq2)
+library(org.Bt.eg.db)
+library(pheatmap)
+library(AnnotationDbi)
+library(RColorBrewer)
+
+# Create the gene-cell type table
+genes <- c("ITGA6", "ITGB1", "KRT5", "KRT8", "KRT14", "KRT18", "KRT19",
+           "CD3E", "CD4", "CD8A", "CD8B", "GYPA", "ITGAM", "PECAM1", "PTPRC",
+           "EMCN", "ENG", "S1PR1", "GAS2", "LOX", "S100A4", "THY1",
+           "ADIPOQ", "CALB2", "PLIN1", "SPX", "TRARG1")
+
+cell_types <- c(rep("Epithelium", 7), 
+                rep("Immune", 8),
+                rep("Endothelial", 3),
+                rep("Stroma/Fibroblast", 4),
+                rep("Adipocyte", 5))
+
+gene_celltype <- data.frame(Gene = genes, CellType = cell_types, stringsAsFactors = FALSE)
+
+# Assume vsd_matrix is already defined from your DESeq2 analysis
+# vsd_matrix <- assay(vsd)
+
+# Map Ensembl IDs to Gene Symbols
+ensembl_ids_full <- rownames(vsd_matrix)
+ensembl_ids_clean <- sub("\\.\\d+$", "", ensembl_ids_full)
+
+gene_symbols <- mapIds(org.Bt.eg.db,
+                       keys = ensembl_ids_clean,
+                       column = "SYMBOL",
+                       keytype = "ENSEMBL",
+                       multiVals = "first")
+
+# Create a data frame for mapping
+df <- data.frame(EnsemblID_full = ensembl_ids_full,
+                 EnsemblID = ensembl_ids_clean,
+                 GeneSymbol = gene_symbols,
+                 stringsAsFactors = FALSE)
+
+# Subset the data frame to include only the genes from your list
+df_selected <- df[df$GeneSymbol %in% gene_celltype$Gene, ]
+
+# Get the Ensembl IDs of the selected genes
+selected_ensembl_ids <- df_selected$EnsemblID_full
+
+# Subset the vsd_matrix to include only these genes
+selected_vsd_matrix <- vsd_matrix[selected_ensembl_ids, ]
+
+# Assign gene symbols as row names
+gene_symbols_selected <- df_selected$GeneSymbol
+names(gene_symbols_selected) <- df_selected$EnsemblID_full
+rownames(selected_vsd_matrix) <- gene_symbols_selected[rownames(selected_vsd_matrix)]
+
+# Normalize each row (gene) to have mean = 0 and sd = 1
+row_normalized_matrix <- t(scale(t(selected_vsd_matrix)))
+
+# Annotate samples with their conditions
+sample_annotations <- as.data.frame(colData(dds)[, c("condition")])
+
+# Rename the column in sample_annotations to 'Condition'
+colnames(sample_annotations) <- "Condition"
+
+# Ensure the Condition column is a factor with the correct levels
+sample_annotations$Condition <- factor(sample_annotations$Condition, 
+                                       levels = c("V", "MP", "LP", "EL", "PL"))
+
+# Create a simple annotation dataframe
+annotation <- data.frame(Condition = sample_annotations$Condition)
+
+# Ensure row names of annotation match the column names of the matrix
+rownames(annotation) <- colnames(selected_vsd_matrix)
+
+# Define colors for the condition annotations
+condition_colors <- list(Condition = c(
+  "V" = "#F8766D",
+  "MP" = "#00BA38",
+  "LP" = "#619CFF",
+  "EL" = "#F564E3", 
+  "PL" = "#FFC000"))
+
+# Define color palette for the heatmap
+heatmap_colors <- colorRampPalette(c("blue", "white", "red"))(50)
+
+# Prepare row annotation for genes (cell types)
+gene_celltype_df <- gene_celltype
+rownames(gene_celltype_df) <- gene_celltype_df$Gene
+
+# Create row annotation for cell types
+annotation_row <- data.frame(CellType = gene_celltype_df[rownames(row_normalized_matrix), "CellType"])
+rownames(annotation_row) <- rownames(row_normalized_matrix)
+
+# Define colors for cell types
+celltype_colors <- c(
+  "Epithelium" = "lightblue",
+  "Immune" = "green",
+  "Endothelial" = "orange",
+  "Stroma/Fibroblast" = "pink",
+  "Adipocyte" = "purple"
+)
+
+# Merge annotation colors
+annotation_colors <- list(
+  Condition = condition_colors$Condition,
+  CellType = celltype_colors
+)
+
+# Generate the heatmap with normalized data
+pheatmap(row_normalized_matrix, 
+         cluster_rows = TRUE, 
+         cluster_cols = FALSE, 
+         annotation_col = annotation,
+         annotation_row = annotation_row,
+         annotation_colors = annotation_colors,
+         color = heatmap_colors,
+         show_rownames = TRUE, 
+         show_colnames = TRUE,
+         main = "Heatmap of Selected Genes with Gene Symbols (Row Normalized)")
+
+```
+
+
+```{r}
+vsd_matrix <- assay(vsd)
+
+# Select the top 50 most variable genes
+top_genes <- head(order(rowVars(vsd_matrix), decreasing = TRUE), 50)
+
+# Subset the matrix to include only these top variable genes
+top_vsd_matrix <- vsd_matrix[top_genes, ]
+
+# Normalize each row (gene) to have mean = 0 and sd = 1
+row_normalized_matrix <- t(scale(t(top_vsd_matrix)))
+
+# Annotate samples with their conditions
+sample_annotations <- as.data.frame(colData(dds)[, c("condition")])
+
+# Rename the column in sample_annotations to 'Condition'
+colnames(sample_annotations) <- "Condition"
+
+# Ensure the Condition column is a factor with the correct levels
+sample_annotations$Condition <- factor(sample_annotations$Condition, 
+                                       levels = c("V", "MP", "LP", "EL", "PL"))
+
+# Create a simple annotation dataframe
+annotation <- data.frame(Condition = sample_annotations$Condition)
+
+# Ensure row names of annotation match the column names of the matrix
+rownames(annotation) <- colnames(top_vsd_matrix)
+
+# Define colors for the condition annotations
+condition_colors <- list(Condition = c(
+  "V" = "#F8766D",
+  "MP" = "#00BA38",
+  "LP" = "#619CFF",
+  "EL" = "#F564E3", 
+  "PL" = "#FFC000"))
+
+# Define color palette for the heatmap
+heatmap_colors <- colorRampPalette(c("blue", "white", "red"))(50)
+
+# Map Ensembl IDs to gene symbols
+ensembl_ids <- rownames(top_vsd_matrix)
+ensembl_ids_clean <- sub("\\.\\d+$", "", ensembl_ids)
+
+gene_symbols <- mapIds(org.Bt.eg.db,
+                       keys = ensembl_ids_clean,
+                       column = "SYMBOL",
+                       keytype = "ENSEMBL",
+                       multiVals = "first")
+
+# Replace NA values with Ensembl IDs
+gene_symbols[is.na(gene_symbols)] <- ensembl_ids_clean[is.na(gene_symbols)]
+
+# Assign gene symbols as row names
+rownames(top_vsd_matrix) <- gene_symbols
+
+# Generate the heatmap with gene symbols
+pheatmap(top_vsd_matrix, 
+         cluster_rows = TRUE, 
+         cluster_cols = FALSE, 
+         annotation_col = annotation,
+         annotation_colors = condition_colors,
+         color = heatmap_colors,
+         show_rownames = TRUE, 
+         show_colnames = TRUE,
+         main = "Heatmap of Top 50 Variable Genes with Gene Symbols")
+
+
+```
+
+# normalize based on the rows, not the whole bunch. Dont cluster based on Cols
+
+## Uncorrected 
+
+```{r, message=FALSE, warning=FALSE}
+dds_uncorected <- DESeqDataSetFromMatrix(
+  countData = count_matrix,
+  colData = samples,
+  design = ~ condition
+)
+
+dds_uncorected <- DESeq(dds_uncorected)
+
+res_uncorected <- results(dds_uncorected)
+```
+
+```{r}
+x <- ls()
+x <- x[!x %in% c("res_uncorected", "dds_uncorected", "dds", "res", "normal")]
+rm(list = x)
+rm(x)
+
+save.image(here("mRNA/processed_data", "mRNA_deseq_results.RData"))
+```

@@ -1,0 +1,397 @@
+---
+title: "Untitled"
+author: "Benji Lamp"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE, echo=F}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(DESeq2)
+library(dplyr)
+library(tidyr)
+library(kableExtra)
+library(here)
+library(AnnotationDbi)
+library(org.Bt.eg.db)
+```
+
+```{r}
+input <- "mRNA_deseq_results.RData"
+load(here("mRNA/processed_data", input))
+```
+
+
+# Timecourse Analysis
+
+```{r, echo=FALSE, message=FALSE}
+dds <- estimateSizeFactors(dds)
+normalized_counts_df <- as.data.frame(counts(dds, normalized=TRUE))
+col_names <- rep(c("V", "MP", "LP", "EL", "PL"), each = 7)
+names(normalized_counts_df) <- col_names
+
+# Prepare an empty data frame for storing averages, with correct dimensions and column names
+averages_df <- data.frame(matrix(ncol = length(unique(col_names)), nrow = nrow(normalized_counts_df)))
+names(averages_df) <- unique(col_names)
+rownames(averages_df) <- rownames(normalized_counts_df)
+
+# Loop through each time-point to calculate and store row means
+for (timepoint in unique(col_names)) {
+  # Identify columns belonging to the current time-point
+  cols <- which(col_names == timepoint)
+  # Calculate and store
+  averages_df[[timepoint]] <- rowMeans(normalized_counts_df[, cols], na.rm = TRUE)
+}
+```
+
+```{r, echo=FALSE, message=FALSE, results='asis'}
+hadf <- head(averages_df)
+# Custom CSS to enlarge table captions
+cat("
+<style>
+table caption {
+  font-size: 16pt;
+  font-weight: bold;
+}
+</style>
+")
+
+# Assuming 'samples' is another data frame you want to display
+kable(hadf, caption = "Mean of Normalized Counts") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+```
+
+## Pairwise Comparison
+
+To perform differential expression analysis, comparative structures need to be formed between timepoints. The loop below iterates through each successive comparison and generates 'res' objects from DESeq2, which contain statistics like log fold change and adjusted p-values for each comparison. After the False Discovery Rate adjusted p-value (padj) is generated, the mean of the normalized counts is evaluated between each comparison. If gene expression increases from time n to n+1, an 'I' will be assigned to the gene. If gene expression decreases from n to n+1, a 'D' will be assigned to the gene.
+
+The adjusted p-value generated from DESeq2 is then used to evaluate whether there is significance. If the padj value is greater than 0.05, the gene will be deemed to have an insignificant change in expression between timepoints and will be assigned an 'S'
+
+
+
+```{r}
+contrasts <- list(
+  c("condition", "PL", "V"),
+  #
+  c("condition", "EL", "V"),
+  c("condition", "PL", "MP"),
+  #
+  c("condition", "LP", "V"),
+  c("condition", "EL", "MP"),
+  c("condition", "PL", "LP"),
+  #
+  c("condition", "MP", "V"),
+  c("condition", "LP", "MP"),
+  c("condition", "EL", "LP"),
+  c("condition", "PL", "EL")
+)
+
+contrast_results <- list()
+
+# DE for pairs in contrasts
+for (i in seq_along(contrasts)) {
+  contrast = contrasts[[i]]
+  res <- results(dds,
+                 contrast=contrast)
+  
+  # Determine if the mean expression increases or decreases
+  condition1_mean <- averages_df[[contrast[3]]]  # Mean for the first condition
+  condition2_mean <- averages_df[[contrast[2]]]  # Mean for the second condition
+  expressionDirection <- ifelse(condition1_mean < condition2_mean, "I", "D")
+  
+  # Hypothesis test, FTR null assign 'S', Rej null assign I/D
+  res$expressionChange <- ifelse(res$padj > 0.05, "S", expressionDirection)
+  
+  contrast_results[[paste(contrast[3], "to", contrast[2])]] <- res
+}
+
+# Loop through each contrast result and add the gene symbol
+for (contrast_name in names(contrast_results)) {
+  
+  # Extract the Ensembl IDs from the current contrast
+  ensembl_ids <- rownames(contrast_results[[contrast_name]])
+  
+  # Map Ensembl IDs to gene symbols
+  gene_symbols <- mapIds(org.Bt.eg.db, 
+                         keys = ensembl_ids, 
+                         column = "SYMBOL", 
+                         keytype = "ENSEMBL", 
+                         multiVals = "first")
+  
+  # Add the gene symbols as a new column to the DESeqResults object
+  contrast_results[[contrast_name]]$gene_symbol <- gene_symbols
+}
+
+# Load the required libraries
+library(openxlsx)
+
+# Create a new workbook
+wb <- createWorkbook()
+
+# Loop through each contrast result and add it to the workbook
+for (contrast_name in names(contrast_results)) {
+  
+  # Extract the current contrast result as a dataframe and add rownames as a new column
+  result_df <- as.data.frame(contrast_results[[contrast_name]])
+  result_df$Ensembl_ID <- rownames(result_df)  # Add row names (Ensembl IDs) as a new column
+  
+  # Reorder the columns so that Ensembl_ID appears first
+  result_df <- result_df[, c("Ensembl_ID", setdiff(names(result_df), "Ensembl_ID"))]
+  
+  # Add a new sheet for this contrast
+  addWorksheet(wb, contrast_name)
+  
+  # Write the dataframe to the corresponding sheet
+  writeData(wb, contrast_name, result_df)
+}
+
+# Save the workbook
+saveWorkbook(wb, "pairwise_deseq_results_Oct24.xlsx", overwrite = TRUE)
+```
+
+## Motif Structuring
+The variables (I,S,D) that corespond to expression are currently being stored in the list of DESeq objects. In order to create an index of gene expression, genes are added to a dataframe that completley describes their patterns of expression over the time course. This tabe can be manipulated in order to generate a singular index of pattern structure depending on the needs of the research. 
+
+
+The complete time course analysis can be organized into a piecewise hierarchical structure with 4 tiers, 
+
+- Primary:		V-PL\
+- Secondary:	V-EL MP-PL\
+- Tertiary:		V-LP MP-EL LP-PL\
+- Quaternary:	V-MP MP-LP LP-EL EL-PL\
+
+A complete model vector will be structured as\
+Primary-Secondary-Tertiary-Quaternary\
+X-XX-XXX-XXXX\
+
+
+```{r}
+combined_results <- data.frame(gene=rownames(contrast_results[[1]]))
+# Loop through each contrast result to combine them
+for (i in seq_along(contrast_results)) {
+  contrast_name <- names(contrast_results)[i]  # Get the name of the current contrast
+  # Create a temporary dataframe with genes and their expression changes for the current contrast
+  temp_df <- data.frame(gene=rownames(contrast_results[[i]]), 
+                        expressionChange=contrast_results[[i]]$expressionChange)
+  colnames(temp_df)[2] <- contrast_name  # Rename the second column to the current contrast name
+  # Merge the temporary dataframe with the combined_results dataframe
+  combined_results <- merge(combined_results, temp_df, by="gene", all=TRUE)
+}
+
+# Concatenate expression patterns to make model vector
+combined_results$modelVector <- apply(combined_results[, -1], 1, 
+                                      function(x) paste(x, collapse = ""))
+
+# for Quaternary tree structure ###############################################################
+combined_results$primary <- combined_results[,2]
+combined_results$secondary <- paste0(combined_results[,3], combined_results[,4])
+combined_results$tertiary <- paste0(combined_results[,5], combined_results[,6], combined_results[,7])
+combined_results$quaternary <- paste0(combined_results[,8], combined_results[,9], combined_results[,10], combined_results[,11])
+
+
+
+```
+
+```{r, echo=FALSE, message=FALSE, results='asis'}
+relevant_data <- combined_results %>%
+  dplyr::select(starts_with("V to"), starts_with("MP to"), starts_with("LP to"), starts_with("EL to"))
+
+# Reshape data from wide to long format
+long_data <- relevant_data %>%
+  pivot_longer(cols = everything(), names_to = "transition", values_to = "event") %>%
+  group_by(transition, event) %>%
+  summarise(count = n(), .groups = 'drop')
+
+# Spread the data back to wide format to see counts for each event type in each transition
+wide_data <- long_data %>%
+  pivot_wider(names_from = event, values_from = count, values_fill = list(count = 0))
+
+
+wide <- as.data.frame(wide_data)
+
+cat("
+<style>
+table caption {
+  font-size: 8pt;
+}
+</style>
+")
+
+# Assuming 'samples' is another data frame you want to display
+kable(wide, caption = "Incedence of Increasing, Decreasing and Steady Genes") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+```
+
+```{r, echo=FALSE, message=FALSE, results='asis'}
+selected_columns <- combined_results[, c(1, 12:16)]
+
+# Custom CSS to enlarge table captions
+cat("
+<style>
+table caption {
+  font-size: 8pt;
+  font-weight: bold;
+}
+</style>
+")
+
+# Assuming 'samples' is another data frame you want to display
+kable(head(combined_results[,1:11]), caption = "") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+kable(head(selected_columns), caption = "First 5 Rows of Pattern Dataframe") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+
+
+```
+
+## Mapping Specific Motif
+
+Reducing the number of comparisons within a pattern structure can significantly decrease the total number of patterns identified. Additionally, depending on the objectives of the experiment, different patterns can be constructed that reveal more biologically relevant structures. Below, the 'vector' variable was constructed to create patterns from virgin to pregnancy to lactation.
+
+```{r}
+motif_index <- list()
+x <- combined_results
+vector <- paste0(x$primary, x$secondary, x$tertiary, x$quaternary)
+
+# Loop through each unique modelVector
+for(model in unique(vector)) {
+  # Subset the genes that match the current modelVector
+  genes <- combined_results$gene[vector == model]
+  # Store
+  motif_index[[model]] <- genes
+}
+
+# Specific patterns can be called using this function 
+length(motif_index$SSSSSSSSSS)
+
+
+```
+
+Throughout this entire process, Ensembl IDs have been used as gene identifiers. To make the data easier to read, mapping to symbols can be done using AnnotationDbi and the org.Bt.eg.db package for bovine gene symbols.
+
+```{r, message=F, warning=F}
+mapped_motif_index <- list()
+for(model in names(motif_index)) {
+  ensembl_ids <- motif_index[[model]]
+  gene_symbols <- tryCatch({
+    mapIds(org.Bt.eg.db,
+           keys = ensembl_ids,
+           column = "SYMBOL",
+           keytype = "ENSEMBL",
+           multivals = 'first')
+  }, error = function(e) {
+    message("Error with model ", model, ": ", e$message)
+    return(NA)  # Return NA or any other placeholder that indicates an error
+  })
+  mapped_motif_index[[model]] <- gene_symbols
+}
+
+
+# Remove the key 'SSSSSS' from the list
+mapped_motif_index_clean <- mapped_motif_index[setdiff(names(mapped_motif_index), 'SSSSSSSSSS')]
+
+# Get the lengths of items mapped to each key
+key_lengths <- sapply(mapped_motif_index_clean, length)
+
+# Order the keys based on the number of items (descending order)
+ordered_key_lengths <- sort(key_lengths, decreasing = TRUE)
+
+# Exclude the lower ~20 keys (you can adjust the number as needed)
+top_key_lengths <- head(ordered_key_lengths, 50)
+
+# Function to split strings into "x-xx-xxx-xxxx" format
+split_string <- function(string) {
+  # Use substr to extract different parts of the string
+  if (nchar(string) >= 10) {
+    return(paste(substr(string, 1, 1),
+                 substr(string, 2, 3),
+                 substr(string, 4, 6),
+                 substr(string, 7, 10),
+                 sep = "-"))
+  } else {
+    # Return the original string if it is shorter than expected
+    return(string)
+  }
+}
+
+# Apply the function to the names of your vector
+top_key_lengths_names <- names(top_key_lengths)
+formatted_names <- sapply(top_key_lengths_names, split_string)
+
+# Update the names of the original vector
+names(top_key_lengths) <- formatted_names
+
+# View the updated names
+top_key_lengths
+# Print the formatted keys
+print(formatted_key_lengths)
+# Create a bar plot of the remaining key lengths ordered by size
+library(ggplot2)
+
+# Convert the data into a data frame and reorder the Pattern factor based on Count
+top_key_lengths_df <- data.frame(
+  Pattern = names(top_key_lengths),
+  Count = as.numeric(top_key_lengths)
+)
+
+# Reorder Pattern based on the Count
+top_key_lengths_df$Pattern <- factor(top_key_lengths_df$Pattern, levels = top_key_lengths_df$Pattern[order(-top_key_lengths_df$Count)])
+
+# Create the plot
+p <- ggplot(top_key_lengths_df, aes(x = Pattern, y = Count)) +
+  geom_bar(stat = "identity", fill = "lightblue", color = "black") +
+  theme_minimal() +
+  labs(title = "Bar Plot of mRNA DE Patterns (Top Patterns)",
+       y = "Number of Items",
+       x = "") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "bold", size = 14),
+        axis.text.y = element_text(face = "bold", size = 14),
+        axis.title = element_text(size = 14),  # Adjust size as needed
+        plot.title = element_text(hjust = 0.5, face = "bold"))
+
+
+# Save the plot with large dimensions
+ggsave(filename = "/Users/lamp_b/Downloads/mRNA_DE_Patterns_Bar_Plot.png", 
+       plot = p, 
+       width = 16, height = 10, units = "in", dpi = 300)
+
+```
+
+```{r}
+# Load the openxlsx package
+library(openxlsx)
+
+# Remove the key 'SSSSSS' and get the top 20 keys with the most items
+mapped_motif_index_clean <- mapped_motif_index[setdiff(names(mapped_motif_index), 'SSSSSS')]
+key_lengths <- sapply(mapped_motif_index_clean, length)
+top_20_keys <- names(sort(key_lengths, decreasing = TRUE)[1:20])
+
+# Create a new workbook
+wb <- createWorkbook()
+
+# Add each top key as a sheet in the workbook
+for (key in top_20_keys) {
+  # Add a sheet with the key as the name
+  addWorksheet(wb, sheetName = key)
+  
+  # Write the data (gene names and IDs) to the sheet
+  writeData(wb, key, as.data.frame(mapped_motif_index_clean[[key]], stringsAsFactors = FALSE))
+}
+
+# Save the workbook
+saveWorkbook(wb, "Top_20_mapped_motif_index.xlsx", overwrite = TRUE)
+
+```
+
+
+```{r}
+x <- ls()
+x <- x[!x %in% c("contrast_results")]
+rm(list = x)
+rm(x)
+
+save.image(here("mRNA/processed_data", "deseq_contrast_results.RData"))
+```
+

@@ -1,0 +1,92 @@
+---
+title: "PCA_Analysis_mRNA"
+author: "Benji Lamp"
+date: '`r Sys.Date()`'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=F, warning=F}
+library(DESeq2) 
+library(ggplot2)  
+library(ggrepel) 
+library(here)
+library(dplyr)
+library(plotly)
+
+input <- "mRNA_deseq_results.RData"
+load(here("mRNA/processed_data", input))
+```
+
+### PCA {.tabset}
+
+#### Corrected PCA
+```{r, message=FALSE, warning=FALSE, echo=F}
+vsd <- vst(dds)
+# Get the PCA data
+pcaData <- plotPCA(vsd, intgroup=c("condition"), returnData=TRUE)
+
+# Extract the percent variance captured by each principal component
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+# Plot with ggplot2
+ggplot(pcaData, aes(x=PC1, y=PC2, color=condition)) +
+  geom_point(size=3) +
+  geom_text_repel(aes(label=row.names(pcaData))) +  # using ggrepel to prevent overlap
+  stat_ellipse(aes(group=condition), level=0.85) +  # adding ellipses around each condition group
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  theme_bw() +
+  ggtitle("ComBat Corrected PCA Plot")
+
+```
+
+#### Raw PCA
+```{r, message=FALSE, warning=FALSE, echo=F}
+vsd <- vst(dds_uncorected)
+# Get the PCA data
+pcaData <- plotPCA(vsd, intgroup=c("condition"), returnData=TRUE)
+
+# Extract the percent variance captured by each principal component
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+# Plot with ggplot2
+ggplot(pcaData, aes(x=PC1, y=PC2, color=condition)) +
+  geom_point(size=3) +
+  geom_text_repel(aes(label=row.names(pcaData))) +  # using ggrepel to prevent overlap
+  stat_ellipse(aes(group=condition), level=0.85) +  # adding ellipses around each condition group
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  theme_bw() +
+  ggtitle("Uncorrected PCA")
+```
+
+#### 3D PCA
+
+```{r, message=FALSE, warning=FALSE}
+vsd <- vst(dds) # variance stabilizing transformation of Deseq object
+pcaResult <- prcomp(t(assay(vsd))) # transpose vsd and perform PCA
+pcaData3D <- as.data.frame(pcaResult$x[, 1:3]) # Extract the first three principal components
+pcaData3D$condition <- vsd$condition # New condition column is added
+
+# Calculate the percent variance for the first three components
+percentVar <- round(100 * pcaResult$sdev^2 / sum(pcaResult$sdev^2)) 
+
+# Create a 3D plot with Plotly
+fig <- plot_ly(data = pcaData3D, x = ~PC1, y = ~PC2, z = ~PC3, color = ~condition, 
+               type = 'scatter3d', mode = 'markers', text = rownames(pcaData3D))
+
+fig <- fig %>% layout(
+  title = "3D PCA Plot",
+  scene = list(
+    xaxis = list(title = paste0("PC1: ", percentVar[1], "% variance")),
+    yaxis = list(title = paste0("PC2: ", percentVar[2], "% variance")),
+    zaxis = list(title = paste0("PC3: ", percentVar[3], "% variance"))
+  )
+)
+
+fig
+```

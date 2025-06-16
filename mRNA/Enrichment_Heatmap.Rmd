@@ -1,0 +1,243 @@
+---
+title: "Enrichment Heatmap"
+author: "Benji Lamp"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(DESeq2)
+library(sva)
+library(tidyr)
+library(here)
+```
+
+```{r}
+input <- "mRNA_filtered_rawcounts.RData"
+load(here("mRNA/processed_data", input))
+```
+
+
+# Normalization
+
+## ComBatSeq
+
+Strandedness as a batch effect was seen to have distorted our data when using principal component analysis as a diagnostic tool. In order to correct the batch effect, the ComBat_seq function from the sva package was used. This function adjusts for batch effects using the batch variable from our metadata and considers the experimental design (like time course variables) to prevent overfitting.
+
+```{r}
+count_matrix <- as.matrix(df)
+
+cdf <- ComBat_seq(count_matrix,
+                  batch = samples$batch,
+                  group = samples$condition)
+```
+
+
+## DESeq2
+
+
+A standard DESeq function was applied using the counts corrected by ComBat_seq and the experimental design from the 'samples' metadata frame.
+
+```{r, message=FALSE, warning=FALSE}
+dds <- DESeqDataSetFromMatrix(
+  countData = cdf,
+  colData = samples,
+  design = ~ condition
+)
+
+dds <- DESeq(dds)
+res <- results(dds)
+```
+
+
+```{r}
+# 1. Create vsd_matrix
+vsd_matrix <- assay(vsd)
+
+# 2. Map Ensembl IDs → gene symbols
+gene_map <- AnnotationDbi::select(
+  org.Bt.eg.db,
+  keys   = rownames(vsd_matrix),
+  keytype = "ENSEMBL",
+  columns = "SYMBOL"
+)
+
+# 3. Add gene symbols as a new column for easy lookup
+vsd_df <- as.data.frame(vsd_matrix)
+vsd_df$SYMBOL <- gene_map$SYMBOL[match(rownames(vsd_df), gene_map$ENSEMBL)]
+
+# 4. Filter for your marker genes
+marker_mat <- vsd_df[vsd_df$SYMBOL %in% gene_celltype$Gene, ]
+rownames(marker_mat) <- marker_mat$SYMBOL
+marker_mat$SYMBOL <- NULL        # remove helper column
+
+# 5. Draw the heat‑map
+ann_colors <- list(CellType = c(
+  Epithelium      = "#F8766D",
+  Immune          = "#00BA38",
+  Endothelial     = "#619CFF",
+  `Stroma/Fibroblast` = "#F564E3",
+  Adipocyte       = "#FFC000"
+))
+
+pheatmap(
+  marker_mat,
+  scale       = "row",
+  annotation_row = gene_celltype[match(rownames(marker_mat), gene_celltype$Gene), "CellType", drop = FALSE],
+  annotation_colors = ann_colors,
+  color       = colorRampPalette(rev(brewer.pal(9, "RdBu")))(100),
+  clustering_method = "complete",
+  show_rownames = TRUE,
+  fontsize_row  = 8
+)
+
+```
+
+```{r}
+# Load necessary libraries
+library(DESeq2)
+library(org.Bt.eg.db)
+library(pheatmap)
+library(AnnotationDbi)
+library(RColorBrewer)
+
+# Create the gene-cell type table
+genes <- c("ITGA6", "ITGB1", "KRT5", "KRT8", "KRT14", "KRT18", "KRT19",
+           "CD3E", "CD4", "CD8A", "CD8B", "GYPA", "ITGAM", "PECAM1", "PTPRC",
+           "EMCN", "ENG", "S1PR1", "GAS2", "LOX", "S100A4", "THY1",
+           "ADIPOQ", "CALB2", "PLIN1", "SPX", "TRARG1")
+
+cell_types <- c(rep("Epithelium", 7), 
+                rep("Immune", 8),
+                rep("Endothelial", 3),
+                rep("Stroma/Fibroblast", 4),
+                rep("Adipocyte", 5))
+
+gene_celltype <- data.frame(Gene = genes, CellType = cell_types, stringsAsFactors = FALSE)
+
+# Assume vsd_matrix is already defined from your DESeq2 analysis
+# vsd_matrix <- assay(vsd)
+
+# Map Ensembl IDs to Gene Symbols
+ensembl_ids_full <- rownames(vsd_matrix)
+ensembl_ids_clean <- sub("\\.\\d+$", "", ensembl_ids_full)
+
+gene_symbols <- mapIds(org.Bt.eg.db,
+                       keys = ensembl_ids_clean,
+                       column = "SYMBOL",
+                       keytype = "ENSEMBL",
+                       multiVals = "first")
+
+# Create a data frame for mapping
+df <- data.frame(EnsemblID_full = ensembl_ids_full,
+                 EnsemblID = ensembl_ids_clean,
+                 GeneSymbol = gene_symbols,
+                 stringsAsFactors = FALSE)
+
+# Subset the data frame to include only the genes from your list
+df_selected <- df[df$GeneSymbol %in% gene_celltype$Gene, ]
+
+# Get the Ensembl IDs of the selected genes
+selected_ensembl_ids <- df_selected$EnsemblID_full
+
+# Subset the vsd_matrix to include only these genes
+selected_vsd_matrix <- vsd_matrix[selected_ensembl_ids, ]
+
+# Assign gene symbols as row names
+gene_symbols_selected <- df_selected$GeneSymbol
+names(gene_symbols_selected) <- df_selected$EnsemblID_full
+rownames(selected_vsd_matrix) <- gene_symbols_selected[rownames(selected_vsd_matrix)]
+
+# Normalize each row (gene) to have mean = 0 and sd = 1
+row_normalized_matrix <- t(scale(t(selected_vsd_matrix)))
+
+# Annotate samples with their conditions
+sample_annotations <- as.data.frame(colData(dds)[, c("condition")])
+
+# Rename the column in sample_annotations to 'Condition'
+colnames(sample_annotations) <- "Condition"
+
+# Ensure the Condition column is a factor with the correct levels
+sample_annotations$Condition <- factor(sample_annotations$Condition, 
+                                       levels = c("V", "MP", "LP", "EL", "PL"))
+
+# Create a simple annotation dataframe
+annotation <- data.frame(Condition = sample_annotations$Condition)
+
+# Ensure row names of annotation match the column names of the matrix
+rownames(annotation) <- colnames(selected_vsd_matrix)
+
+# Define colors for the condition annotations
+condition_colors <- list(Condition = c(
+  "V" = "#F8766D",
+  "MP" = "#00BA38",
+  "LP" = "#619CFF",
+  "EL" = "#F564E3", 
+  "PL" = "#FFC000"))
+
+# Define color palette for the heatmap
+heatmap_colors <- colorRampPalette(c("blue", "white", "red"))(50)
+
+# Prepare row annotation for genes (cell types)
+gene_celltype_df <- gene_celltype
+rownames(gene_celltype_df) <- gene_celltype_df$Gene
+
+# Create row annotation for cell types
+annotation_row <- data.frame(CellType = gene_celltype_df[rownames(row_normalized_matrix), "CellType"])
+rownames(annotation_row) <- rownames(row_normalized_matrix)
+
+# Define colors for cell types
+celltype_colors <- c(
+  "Epithelium" = "lightblue",
+  "Immune" = "green",
+  "Endothelial" = "orange",
+  "Stroma/Fibroblast" = "pink",
+  "Adipocyte" = "purple"
+)
+
+# Merge annotation colors
+annotation_colors <- list(
+  Condition = condition_colors$Condition,
+  CellType = celltype_colors
+)
+
+## ---- everything above here stays the same ----
+
+# Order the genes so that rows appear grouped by CellType  ▼▼  (insert here)
+celltype_levels <- c("Epithelium","Immune","Endothelial",
+                     "Stroma/Fibroblast","Adipocyte")
+
+annotation_row$CellType <- factor(annotation_row$CellType,
+                                  levels = celltype_levels)
+
+row_order <- order(annotation_row$CellType)          # indices in the new order
+row_normalized_matrix <- row_normalized_matrix[row_order, ]
+annotation_row        <- annotation_row[row_order, , drop = FALSE]
+
+# (optional) add blank lines between groups
+gaps_row <- cumsum(table(annotation_row$CellType))[ -length(celltype_levels) ]
+
+# ---- pheatmap call -----------------------------------------------------------
+pheatmap(row_normalized_matrix,
+         cluster_rows      = FALSE,
+         cluster_cols      = FALSE,
+         gaps_row          = gaps_row,
+         annotation_col    = annotation,
+         annotation_row    = annotation_row,
+         annotation_colors = annotation_colors,
+         color             = heatmap_colors,
+         show_rownames     = TRUE,
+         show_colnames     = TRUE,
+         main = "Heatmap of Enriched Genes",
+         filename = "celltype_heatmap.png", 
+         width = 8, height = 6                # adjust size as needed
+)
+
+
+
+```
+

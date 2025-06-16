@@ -1,0 +1,245 @@
+---
+title: "mrna degpatterns"
+author: "Benji Lamp"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=F}
+library(DESeq2)
+library(here)
+library(DEGreport)
+library(org.Bt.eg.db)
+library(AnnotationDbi)
+library(dplyr)
+library(tibble)
+library(tidyr)
+library(ggplot2)
+```
+
+# Intro
+Using deg patterns to cluster mirna based on zscore based off of a timecourse.
+\ Use normalized counts from deseq
+
+```{r}
+input <- "mRNA_deseq_results.RData"
+load(here("mRNA/processed_data", input))
+
+normalized_counts <- counts(dds, normalized = TRUE)
+
+background <- as.data.frame(rownames(normalized_counts))
+background$gene_symbol <- mapIds(org.Bt.eg.db,
+                                 keys = background$`rownames(normalized_counts)`,
+                                 column = "SYMBOL",
+                                 keytype = "ENSEMBL",
+                                 multiVals = "first")
+
+# Reset row names to a column to retain them in the Excel file
+background <- cbind("row.names" = row.names(background), background)
+
+# Export the data frame to an Excel file
+write.xlsx(background, file = "background.xlsx", rowNames = FALSE)
+
+# Confirm success
+cat("The file 'background.xlsx' has been successfully saved.\n")
+```
+
+
+## Metadata
+
+This wont be used later, but its good to have i guess
+```{r}
+normalized_counts <- counts(dds, normalized = TRUE)
+
+# Assuming colnames(normalized_counts) gives the column names as shown
+col_names <- colnames(normalized_counts)
+
+split_names <- strsplit(col_names, " ")
+
+# Extract time points and cow IDs
+time_points <- sapply(split_names, `[`, 1)
+cow_ids <- sapply(split_names, `[`, 2)
+
+# Create the metadata data frame
+metadata <- data.frame(
+  SampleID = col_names,
+  Time = factor(time_points,
+                levels = c("V", "MP", "LP", "EL", "PL")),
+  CowID = cow_ids
+)
+
+# Set row names to match SampleID (optional)
+rownames(metadata) <- metadata$SampleID
+```
+# padj filtering 
+
+mRNAs that are significant in ANY pairwise comp is considered for analysis
+```{r}
+# List all pairwise comparisons
+timepoints <- c("V", "MP", "LP", "EL", "PL")
+comparisons <- combn(timepoints, 2, simplify = FALSE)
+
+# Initialize a vector to store significant genes
+significant_genes <- c()
+
+# Loop through each comparison
+for (comparison in comparisons) {
+  res <- results(dds, contrast = c("condition", comparison[2], comparison[1]))
+  sig_genes <- rownames(res)[which(res$padj < 0.05)]
+  significant_genes <- unique(c(significant_genes, sig_genes))
+}
+
+# Subset normalized counts for significant genes only
+normalized_counts <- counts(dds, normalized = TRUE)
+filtered_counts <- normalized_counts[significant_genes, ]
+```
+
+# mean normalized counts table 
+```{r}
+colnames(filtered_counts) <- metadata$SampleID
+
+# Calculate mean counts per time point
+mean_counts <- filtered_counts %>%
+  as.data.frame() %>%
+  rownames_to_column("gene") %>%
+  gather(SampleID, count, -gene) %>%
+  left_join(metadata, by = "SampleID") %>%
+  group_by(gene, Time) %>%
+  summarize(mean_count = mean(count)) %>%
+  spread(Time, mean_count)
+
+# Convert back to matrix format
+mean_counts_matrix <- as.matrix(mean_counts[, -1])
+rownames(mean_counts_matrix) <- mean_counts$gene
+
+head(mean_counts_matrix)
+
+```
+
+# New metadata frame
+
+new meta frame that only consider individual timepoint, not cow IDs. 
+```{r}
+# Extract the unique time points from your original metadata
+time_points <- levels(metadata$Time) 
+metadata_time <- data.frame(
+  Time = factor(time_points, levels = c("V", "MP", "LP", "EL", "PL"))
+)
+rownames(metadata_time) <- time_points  
+
+```
+
+
+# Test
+```{r}
+library(pheatmap)
+
+# Z-score transformation (optional, to normalize rows for better visual contrast)
+# If your data is already normalized (as in your case), you can skip this step
+z_score_matrix <- t(scale(t(filtered_counts)))  # Scale the rows (genes)
+
+# Generate the heatmap using pheatmap
+pheatmap(log2(counts(dds) + 0.5), 
+         annotation_col = metadata[, c("Time", "CowID")],  # Add metadata as annotations
+         cluster_rows = TRUE,  # Cluster genes (rows)
+         cluster_cols = TRUE,  # Cluster samples (columns)
+         show_rownames = FALSE,  # Hide gene names (optional, for large datasets)
+         show_colnames = TRUE,   # Show sample names
+         color = colorRampPalette(c("navy", "white", "firebrick3"))(50),  # Define color scale
+         main = "Heatmap of mRNA Expression")
+```
+
+# degPatterns 
+
+in mrna, I used a cluser cuttoff of 15 genes, \
+15/845 = x/12281 \ 
+x = 285
+```{r}
+# Run degPatterns using the mean counts
+deg_patterns <- degPatterns(
+  ma = mean_counts_matrix, 
+  metadata = metadata_time,  
+  time = "Time",
+  minc = 10              
+)
+
+x <- ls()
+x <- x[!x %in% c("mean_counts_matrix", "metadata_time")]
+rm(list = x)
+rm(x)
+
+save.image(here("mRNA/processed_data", "degpattens_threshold_input.RData"))
+```
+
+
+
+```{r}
+normalized_data <- deg_patterns$normalized
+
+deg_plot <- degPlotCluster(
+  table = normalized_data,   
+  time = "Time",             
+  points = F,
+  cluster_column = "cluster",
+  prefix_title = "Group: "   
+)
+
+
+deg_plot <- deg_plot + theme_minimal() + 
+  labs(title = "Gene Expression Clusters Over Time") + 
+  theme(legend.position = "none") # Remove the legend
+
+# Print the plot
+print(deg_plot)
+```
+
+
+
+```{r}
+mrna_clusters <- deg_patterns$df
+
+# Extract unique Ensembl IDs from your data
+ensembl_ids <- unique(mrna_clusters$genes)
+
+# Use select function from AnnotationDbi to map Ensembl IDs to Gene Symbols
+mapping <- AnnotationDbi::select(
+  x = org.Bt.eg.db,
+  keys = ensembl_ids,
+  columns = c("ENSEMBL", "SYMBOL"),
+  keytype = "ENSEMBL"
+)
+
+# Merge the gene symbol mapping with your original data frame
+mrna_clusters_mapped <- merge(
+  mrna_clusters,
+  mapping,
+  by.x = "genes",
+  by.y = "ENSEMBL",
+  all.x = TRUE
+)
+
+
+mrna_deg_patterns <- deg_patterns 
+
+write.csv(mrna_clusters_mapped, "mrna_clusters.csv")
+
+head(mrna_cluster)
+```
+ 
+
+
+```{r}
+x <- ls()
+x <- x[!x %in% c("mrna_deg_patterns", "deg_plot","mrna_clusters_mapped", "metadata_time", "mean_counts_matrix")]
+rm(list = x)
+rm(x)
+
+save.image(here("mRNA/processed_data", "mrna_deg_patterns.RData"))
+```
+
+
+

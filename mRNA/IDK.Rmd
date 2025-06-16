@@ -1,0 +1,167 @@
+---
+title: "Untitled"
+author: "Benji Lamp"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+horse <- load("/Users/lamp_b/Bioinformatics/transcriptional_dynamics_of_bov_mam/mRNA/deg_patterns_results/normalized_data_minc_10.RData")
+cow <- load("/Users/lamp_b/Bioinformatics/transcriptional_dynamics_of_bov_mam/mRNA/misc/combined_results.RData")
+load("/Users/lamp_b/Bioinformatics/transcriptional_dynamics_of_bov_mam/mRNA/deg_patterns_results/deg_patterns_minc_10.RData")
+
+
+head(normalized_data)
+head(combined_results)
+
+# Subset normalized_data to keep only 'genes' and 'cluster' columns
+normalized_data_subset <- normalized_data[, c("genes", "cluster")]
+
+# Remove duplicates in normalized_data_subset based on 'genes'
+normalized_data_subset <- normalized_data_subset[!duplicated(normalized_data_subset$genes), ]
+
+# Merge combined_results with the deduplicated normalized_data
+merged_data <- merge(
+  combined_results,
+  normalized_data_subset,
+  by.x = "gene",      # Column name in combined_results
+  by.y = "genes",     # Column name in normalized_data_subset
+  all.x = TRUE        # Keeps all rows from combined_results
+)
+
+# Check the structure of the merged data
+head(merged_data)
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+
+# Summarize counts of S, I, and D for each transition and cluster
+summary_table <- merged_data %>%
+  group_by(cluster) %>%
+  summarize(
+    V_to_MP_S = sum(`V to PL` == "S", na.rm = TRUE),
+    V_to_MP_I = sum(`V to PL` == "I", na.rm = TRUE),
+    V_to_MP_D = sum(`V to PL` == "D", na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Reshape the table to create one table per cluster
+cluster_tables <- summary_table %>%
+  pivot_longer(
+    cols = -cluster,
+    names_to = c("transition", "category"),
+    names_pattern = "(.*)_(.*)",
+    values_to = "count"
+  ) %>%
+  pivot_wider(
+    names_from = transition,
+    values_from = count
+  )
+
+# Split the table into a list, one dataframe per cluster
+cluster_tables_list <- split(cluster_tables, cluster_tables$cluster)
+
+
+
+
+library(writexl)
+
+library(writexl)
+
+# Set the output directory
+output_dir <- "/Users/lamp_b/Bioinformatics/transcriptional_dynamics_of_bov_mam/mRNA/misc"
+
+# Ensure the output directory exists
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
+
+# Prepare a named list of dataframes for each cluster
+cluster_excel_data <- cluster_tables_list %>%
+  setNames(paste0("Cluster_", seq_along(cluster_tables_list)))
+
+# Save the Excel file
+excel_file_path <- file.path(output_dir, "cluster_tables_primary.xlsx")
+write_xlsx(cluster_excel_data, path = excel_file_path)
+
+# Print the file path for confirmation
+print(paste("Excel file saved at:", excel_file_path))
+```
+
+```{r}
+# Load required library
+library(openxlsx)
+
+# Define the output file path
+output_file <- "/Users/lamp_b/Bioinformatics/transcriptional_dynamics_of_bov_mam/mRNA/misc/cluster_tables1.xlsx"
+
+# Define the conditions
+conditions <- c("V", "MP", "LP", "EL", "PL")
+
+# Function to create intersection matrices for each cluster
+create_intersection_matrix <- function(data) {
+  # Initialize an empty matrix
+  matrix_result <- matrix(NA, nrow = length(conditions), ncol = length(conditions),
+                          dimnames = list(conditions, conditions))
+  
+  # Iterate over pairs of conditions
+  for (i in seq_along(conditions)) {
+    for (j in seq_along(conditions)) {
+      if (i != j) {  # Skip diagonal elements
+        # Construct the column name (e.g., "V to MP", "MP to LP")
+        if (i < j) {
+          col_name <- paste(conditions[i], "to", conditions[j])  # Top half
+        } else {
+          col_name <- paste(conditions[j], "to", conditions[i])  # Bottom half
+        }
+        
+        # Check if the column exists in the data
+        if (col_name %in% colnames(data)) {
+          if (i < j) {
+            # Count "I" for the top half
+            count_I <- sum(data[[col_name]] == "I", na.rm = TRUE)
+            matrix_result[i, j] <- count_I
+          } else {
+            # Count "D" for the bottom half
+            count_D <- sum(data[[col_name]] == "D", na.rm = TRUE)
+            matrix_result[i, j] <- count_D
+          }
+        }
+      }
+    }
+  }
+  
+  return(matrix_result)
+}
+
+# Create a list of cluster matrices
+clusters <- unique(merged_data$cluster[!is.na(merged_data$cluster)])  # Get unique clusters
+cluster_matrices <- lapply(clusters, function(cluster) {
+  cluster_data <- merged_data[merged_data$cluster == cluster, ]  # Filter data for the cluster
+  create_intersection_matrix(cluster_data)
+})
+
+# Create a new workbook
+wb <- createWorkbook()
+
+# Add each cluster matrix as a separate sheet
+for (i in seq_along(clusters)) {
+  cluster_name <- paste0("Cluster_", clusters[i])
+  addWorksheet(wb, cluster_name)
+  writeData(wb, cluster_name, cluster_matrices[[i]], rowNames = TRUE)
+}
+
+# Save the workbook
+saveWorkbook(wb, output_file, overwrite = TRUE)
+
+cat("Workbook saved at:", output_file, "\n")
+```
+
+
+
+
+

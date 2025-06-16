@@ -1,0 +1,58 @@
+---
+title: "DEG Pattenrns thresholding test"
+author: "Benji Lamp"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# DEG Pattenrns thresholding test
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(here)
+library(DEGreport)
+library(ggplot2)
+
+
+load(here("mRNA/processed_data", "degpattens_threshold_input.RData"))
+
+minc_test <- c(200, 150, 100, 50, 10)
+
+for (n in minc_test) {
+  # Generate degPatterns object
+  deg_patterns <- degPatterns(
+    ma = mean_counts_matrix, 
+    metadata = metadata_time,  
+    time = "Time",
+    minc = n             
+  )
+  
+  # Extract normalized data
+  normalized_data <- deg_patterns$normalized
+  
+  # Create cluster plot
+  deg_plot <- degPlotCluster(
+    table = normalized_data,   
+    time = "Time",             
+    points = FALSE,
+    cluster_column = "cluster",
+    prefix_title = paste("Group (minc =", n, "):")   
+  )
+  
+  # Customize the plot
+  deg_plot <- deg_plot + 
+    theme_minimal() + 
+    labs(title = "Gene Expression Clusters Over Time") + 
+    theme(legend.position = "none") # Remove the legend
+  
+  # Save the plot to a file
+  output_file <- paste0("deg_cluster_plot_minc_", n, ".png") # Create a unique filename
+  ggsave(filename = output_file, plot = deg_plot, width = 8, height = 6) # Adjust dimensions as needed
+  
+  # Print a message to confirm
+  print(paste("Plot saved to:", output_file))
+}
+```
